@@ -1,8 +1,7 @@
 from flask import Flask, request, render_template
 import utils
+from matcher import load_spanish_model, find_words
 import os
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 
 
 app = Flask(__name__)
@@ -17,37 +16,28 @@ def match_resume():
 @app.route("/matcher", methods=["POST"])
 def matcher():
     if request.method == "POST":
-        job_description = request.form["job_description"]
-        resume_files = request.files.getlist("resumes")
+        raw_labels = request.form.get("labels", "")
+        resumes = request.files.getlist("resumes")
 
-        resumes = []
-        for resume_file in resume_files:
-            filename = os.path.join(app.config["UPLOAD_FOLDER"], resume_file.filename)
-            resume_file.save(filename)
-            resumes.append(utils.extract_text(filename))
-
-        if not resumes or not job_description:
+        if not resumes or not raw_labels:
             return render_template(
                 "index.html",
                 message="Please upload resumes and enter a job description.",
             )
 
-        vectorizer = TfidfVectorizer().fit_transform([job_description] + resumes)
-        vectors = vectorizer.toarray()
+        labels = [label.strip() for label in raw_labels.split(",") if label.strip()]
+        model = load_spanish_model()
 
-        job_vector = vectors[0]
-        resume_vectors = vectors[1:]
-        similarities = cosine_similarity([job_vector], resume_vectors)[0]
-
-        top_indices = similarities.argsort()[-5:][::-1]
-        top_resumes = [resume_files[i].filename for i in top_indices]
-        similarity_scores = [round(similarities[i], 2) for i in top_indices]
+        results = []
+        for resume in resumes:
+            filename = os.path.join(app.config["UPLOAD_FOLDER"], resume.filename)
+            resume.save(filename)
+            text = utils.extract_text_from_pdf(filename)
+            found = find_words(text, labels, model)
+            results.append(found)
 
         return render_template(
-            "index.html",
-            message="Top matching resumes:",
-            top_resumes=top_resumes,
-            similarity_scores=similarity_scores,
+            "index.html", message="Results:", resumes=resumes, results=results
         )
 
 
